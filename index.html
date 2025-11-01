@@ -1,36 +1,314 @@
-<!DOCTYPE html>
-<html lang="vi">
+<!doctype html>
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Color Picker</title>
-  <link rel="stylesheet" href="style.css" />
+  <meta charset="utf-8" />
+  <title>Speaker Demo — Auto-learn + STT + Save Q</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body{background:#0b0b0b;color:#fff;font-family:system-ui,Segoe UI,Roboto;display:flex;flex-direction:column;align-items:center;padding:24px;gap:12px}
+    .row{display:flex;gap:8px;align-items:center}
+    button{padding:10px 14px;border-radius:10px;border:0;background:#1f2937;color:#fff;cursor:pointer}
+    input,select,textarea{padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:#fff}
+    #log{width:min(920px,96%);max-height:300px;overflow:auto;background:rgba(255,255,255,0.02);padding:12px;border-radius:10px}
+    .chip{display:inline-block;padding:6px 10px;border-radius:999px;background:rgba(255,255,255,0.03);margin:4px}
+    .good{color:#9AE6B4} .bad{color:#FCA5A5}
+    #convList{width:min(920px,96%);max-height:320px;overflow:auto;background:rgba(255,255,255,0.02);padding:12px;border-radius:10px}
+    .msg{padding:6px 8px;border-radius:8px;margin:6px 0}
+    .speaker{font-weight:700}
+    .time{opacity:0.6;font-size:12px}
+    label.inline{display:flex;align-items:center;gap:6px}
+  </style>
 </head>
 <body>
-  <div class="app-container">
-    <h1 id="title"> Chọn màu từ ảnh</h1>
+  <h2>Speaker Demo — Auto-learn + STT + Save Q</h2>
 
-    <input type="file" id="upload" accept="image/*" />
-
-    <div class="canvas-wrapper">
-      <canvas id="canvas"></canvas>
-    </div>
-
-    <p>
-      <span id="colorLabel">Mã màu:</span>
-      <span id="colorCode">#______</span>
-    </p>
-
-    <div id="colorHistoryContainer">
-      <span id="historyLabel">Bảng màu gần đây:</span>
-      <div id="colorHistory"></div>
-    </div>
-
-    <button id="langToggle">EN</button>
-
-    <div id="founder">Founder: aduanhvi</div>
+  <div class="row">
+    <input id="profileName" placeholder="Enter speaker name (e.g. Ngan)" />
+    <button id="enrollBtn">Enroll sample (3-8s)</button>
+    <button id="clearProfiles">Clear Profiles</button>
   </div>
 
-  <script src="script.js"></script>
+  <div class="row">
+    <button id="startRec">Start Continuous</button>
+    <button id="stopRec" disabled>Stop</button>
+    <label style="margin-left:12px">Chunk length:
+      <select id="chunkLen">
+        <option value="3000">3s</option>
+        <option value="2000">2s</option>
+        <option value="4000">4s</option>
+      </select>
+    </label>
+    <label style="margin-left:12px">Threshold:
+      <input id="thresh" type="number" step="0.01" value="0.74" style="width:80px" />
+    </label>
+  </div>
+
+  <div class="row">
+    <div id="profilesArea"></div>
+  </div>
+
+  <div class="row" style="gap:12px;align-items:center">
+    <label class="inline"><input type="checkbox" id="autoLearn" checked /> Auto-learn unknown voices</label>
+    <label class="inline">Backend URL: <input id="backendUrl" value="http://localhost:3000/transcribe" style="width:360px" /></label>
+  </div>
+
+  <div id="status" class="row">Status: idle</div>
+
+  <h3>Recent activity</h3>
+  <div id="log"></div>
+
+  <h3>Conversation (saved)</h3>
+  <div id="convList"></div>
+
+  <!-- Meyda -->
+  <script src="https://unpkg.com/meyda/dist/web/meyda.min.js"></script>
+
+<script>
+(async function(){
+
+/* ----------------- Utils ----------------- */
+function el(id){ return document.getElementById(id); }
+function log(...a){
+  const elLog = el('log');
+  elLog.innerHTML = a.map(x=>typeof x==='object'?JSON.stringify(x):x).join(' ') + '<br/>' + elLog.innerHTML;
+}
+function cosine(a,b){
+  if(!a||!b||a.length!==b.length) return -1;
+  let dot=0, na=0, nb=0;
+  for(let i=0;i<a.length;i++){ dot+=a[i]*b[i]; na+=a[i]*a[i]; nb+=b[i]*b[i]; }
+  return dot / (Math.sqrt(na)*Math.sqrt(nb) + 1e-12);
+}
+
+/* ----------------- Storage for profiles & conversation ----------------- */
+let profiles = JSON.parse(localStorage.getItem('sp_profiles')||'{}');
+function saveProfiles(){ localStorage.setItem('sp_profiles', JSON.stringify(profiles)); renderProfiles(); }
+function renderProfiles(){
+  const a = el('profilesArea');
+  a.innerHTML = '';
+  for(const name in profiles){
+    const span = document.createElement('span'); span.className='chip';
+    span.textContent = `${name} (${profiles[name].length} vecs)`;
+    a.appendChild(span);
+  }
+}
+renderProfiles();
+
+let conversation = JSON.parse(localStorage.getItem('conversation')||'[]');
+function saveConversation(){ localStorage.setItem('conversation', JSON.stringify(conversation)); renderConversation(); }
+function renderConversation(){
+  const out = el('convList'); out.innerHTML='';
+  for(let i=conversation.length-1;i>=0;i--){
+    const m = conversation[i];
+    const d = document.createElement('div'); d.className='msg';
+    d.style.background = m.isQuestion ? 'rgba(154,230,180,0.06)' : 'rgba(255,255,255,0.02)';
+    d.innerHTML = `<div class="speaker">${m.speaker} <span class="time">${(new Date(m.time)).toLocaleString()}</span></div>
+                   <div>${m.text}</div>
+                   <div style="opacity:.8;font-size:12px">isQuestion: ${m.isQuestion}</div>`;
+    out.appendChild(d);
+  }
+}
+renderConversation();
+
+function nextUnknownCount(){
+  const c = parseInt(localStorage.getItem('unknownCount')||'0',10) + 1;
+  localStorage.setItem('unknownCount', String(c));
+  return c;
+}
+
+/* ----------------- Audio / MFCC helpers ----------------- */
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+let mediaStream = null;
+
+async function blobToAudioBuffer(blob){
+  const arr = await blob.arrayBuffer();
+  return await audioCtx.decodeAudioData(arr);
+}
+function computeMFCCFromBuffer(audioBuffer){
+  const sampleRate = audioBuffer.sampleRate;
+  let sig = audioBuffer.getChannelData(0);
+  const maxSamples = sampleRate * 5;
+  if(sig.length > maxSamples) sig = sig.slice(0, maxSamples);
+  const frameSize = 2048, hop = 512;
+  const mfccs = [];
+  for(let i=0;i+frameSize<=sig.length;i+=hop){
+    try{
+      const mf = Meyda.extract('mfcc', sig.slice(i,i+frameSize), {bufferSize:frameSize, sampleRate});
+      if(mf && mf.length) mfccs.push(mf);
+    }catch(e){}
+  }
+  if(mfccs.length===0) return new Array(13).fill(0);
+  const avg = new Array(mfccs[0].length).fill(0);
+  for(const m of mfccs) for(let i=0;i<m.length;i++) avg[i]+=m[i];
+  for(let i=0;i<avg.length;i++) avg[i]/=mfccs.length;
+  return avg;
+}
+
+/* ----------------- Enroll sample ----------------- */
+el('enrollBtn').addEventListener('click', async ()=>{
+  const name = (el('profileName').value||'').trim();
+  if(!name){ alert('Enter a name first'); return; }
+  if(!mediaStream) {
+    try{ mediaStream = await navigator.mediaDevices.getUserMedia({audio:true}); }
+    catch{ alert('Microphone permission required'); return; }
+  }
+  const rec = new MediaRecorder(mediaStream);
+  const bufs=[];
+  rec.ondataavailable = e=>bufs.push(e.data);
+  rec.start();
+  log('Recording enrollment sample for', name, '...');
+  await new Promise(r=>setTimeout(r,5000));
+  rec.stop();
+  await new Promise(r=>rec.onstop=r);
+  const blob = new Blob(bufs, {type:'audio/webm;codecs=opus'});
+  const ab = await blobToAudioBuffer(blob);
+  const vec = computeMFCCFromBuffer(ab);
+  profiles[name] = profiles[name] || [];
+  profiles[name].push(vec);
+  saveProfiles();
+  log('Enrolled', name);
+});
+
+/* ----------------- Clear profiles ----------------- */
+el('clearProfiles').addEventListener('click', ()=>{
+  if(confirm('Clear all profiles?')){
+    profiles={}; saveProfiles(); log('Profiles cleared');
+  }
+});
+
+/* ----------------- STT: call backend /transcribe ----------------- */
+async function transcribeChunk(blob){
+  try{
+    const backendUrl = el('backendUrl').value.trim() || '/transcribe';
+    const form = new FormData();
+    // name it .webm (backend will forward buffer)
+    form.append('file', blob, 'audio.webm');
+    const res = await fetch(backendUrl, { method:'POST', body: form });
+    if(!res.ok){
+      const txt = await res.text();
+      console.error('transcribe error', res.status, txt);
+      return { error: `HTTP ${res.status}` };
+    }
+    const data = await res.json();
+    return data;
+  }catch(e){
+    console.error('transcribeChunk error', e);
+    return { error: e.message };
+  }
+}
+
+/* ----------------- Question heuristic ----------------- */
+function isLikelyQuestion(text){
+  if(!text) return false;
+  const t = text.trim().toLowerCase();
+  if(t.includes('?')) return true;
+  // Vietnamese question words
+  const qwords = ['ai','gì','giao','tại sao','sao','như thế nào','như thế nào','khi nào','ở đâu','bao giờ','được không','có phải'];
+  for(const w of qwords){
+    if(t.startsWith(w) || t.includes(' ' + w + ' ') ) return true;
+  }
+  // English quick check
+  const eng = ['what','why','how','when','where','who','does','do','is','are','can','could','would'];
+  for(const w of eng){
+    if(t.startsWith(w + ' ') ) return true;
+  }
+  return false;
+}
+
+/* ----------------- Continuous record + auto-learn unknown ----------------- */
+let chunkLenMs = parseInt(el('chunkLen').value,10);
+let thresh = parseFloat(el('thresh').value);
+el('chunkLen').addEventListener('change',e=>chunkLenMs=parseInt(e.target.value,10));
+el('thresh').addEventListener('change',e=>thresh=parseFloat(e.target.value));
+
+let recorder = null, tempBufs = [], continuousTimer = null;
+
+el('startRec').addEventListener('click', async ()=>{
+  if(!mediaStream){
+    try{ mediaStream = await navigator.mediaDevices.getUserMedia({audio:true}); }
+    catch{ alert('Need mic'); return; }
+  }
+  tempBufs = [];
+  recorder = new MediaRecorder(mediaStream, {mimeType:'audio/webm;codecs=opus'});
+  recorder.ondataavailable = e=>{ if(e.data && e.data.size>0) tempBufs.push(e.data); };
+  recorder.start(1000);
+  el('startRec').disabled = true;
+  el('stopRec').disabled = false;
+  el('status').textContent = 'Recording continuous...';
+  log('Started continuous recording');
+
+  continuousTimer = setInterval(async ()=>{
+    if(tempBufs.length===0) return;
+    // take all current data
+    const chunkBlob = new Blob(tempBufs.splice(0), {type:'audio/webm;codecs=opus'});
+    // non-blocking processing
+    (async ()=>{
+      try{
+        // compute vector
+        const ab = await blobToAudioBuffer(chunkBlob);
+        const vec = computeMFCCFromBuffer(ab);
+
+        // match against profiles
+        let bestName='Unknown', bestScore=-1;
+        for(const name in profiles){
+          for(const p of profiles[name]){
+            const s = cosine(vec, p);
+            if(s > bestScore){ bestScore = s; bestName = name; }
+          }
+        }
+
+        // If no profiles exist, bestScore remains -1 -> label Unknown
+        let label = (bestScore >= thresh) ? bestName : 'Unknown';
+        const tISO = new Date().toISOString();
+
+        // Auto-learn: if Unknown but similarity > small threshold => create unknown#n
+        if(label === 'Unknown' && el('autoLearn').checked && bestScore > 0.45){
+          const cur = nextUnknownCount();
+          const uname = `unknown #${cur}`;
+          profiles[uname] = profiles[uname] || [];
+          profiles[uname].push(vec);
+          saveProfiles();
+          label = uname;
+          log(`🆕 Auto-learned new voice as ${uname} (score=${bestScore.toFixed(3)})`);
+        } else {
+          log(`[${(new Date()).toLocaleTimeString()}] Chunk matched: ${label} (score=${bestScore.toFixed(3)})`);
+        }
+
+        // Send chunk to backend for transcription
+        const sttRes = await transcribeChunk(chunkBlob);
+        let text = '(no-transcript)';
+        if(sttRes && sttRes.text) text = sttRes.text;
+        else if(sttRes && sttRes.error) text = `[transcribe error: ${sttRes.error}]`;
+
+        // Determine if it's likely a question (simple heuristic)
+        const isQ = isLikelyQuestion(text);
+
+        // Save conversation entry
+        const entry = { speaker: label, time: tISO, text, isQuestion: !!isQ };
+        conversation.push(entry);
+        saveConversation();
+
+        // Log nicely
+        log(`→ ${label}: ${text}  [isQuestion=${isQ}]`);
+      }catch(e){
+        console.error(e);
+      }
+    })();
+  }, chunkLenMs);
+});
+
+el('stopRec').addEventListener('click', ()=>{
+  if(recorder && recorder.state!=='inactive') recorder.stop();
+  clearInterval(continuousTimer);
+  tempBufs=[];
+  el('startRec').disabled = false;
+  el('stopRec').disabled = true;
+  el('status').textContent='Idle';
+  log('Stopped continuous recording');
+});
+
+/* ----------------- On load note ----------------- */
+log('Ready — enroll speakers or enable Auto-learn, then Start Continuous.');
+})();
+</script>
 </body>
 </html>
