@@ -1,314 +1,359 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Speaker Demo — Auto-learn + STT + Save Q</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>AduAIvoice — Speaker Demo</title>
+
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    body{background:#0b0b0b;color:#fff;font-family:system-ui,Segoe UI,Roboto;display:flex;flex-direction:column;align-items:center;padding:24px;gap:12px}
-    .row{display:flex;gap:8px;align-items:center}
-    button{padding:10px 14px;border-radius:10px;border:0;background:#1f2937;color:#fff;cursor:pointer}
-    input,select,textarea{padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:#fff}
-    #log{width:min(920px,96%);max-height:300px;overflow:auto;background:rgba(255,255,255,0.02);padding:12px;border-radius:10px}
-    .chip{display:inline-block;padding:6px 10px;border-radius:999px;background:rgba(255,255,255,0.03);margin:4px}
-    .good{color:#9AE6B4} .bad{color:#FCA5A5}
-    #convList{width:min(920px,96%);max-height:320px;overflow:auto;background:rgba(255,255,255,0.02);padding:12px;border-radius:10px}
-    .msg{padding:6px 8px;border-radius:8px;margin:6px 0}
-    .speaker{font-weight:700}
-    .time{opacity:0.6;font-size:12px}
-    label.inline{display:flex;align-items:center;gap:6px}
+    /* small extra styles */
+    .glass { background: rgba(255,255,255,0.04); backdrop-filter: blur(6px); }
+    .accent-orange { color: #fb923c; }
+    .accent-blue { color: #60a5fa; }
+    .msg-sender { font-weight:700; }
+    .pulse-dot { width:10px; height:10px; border-radius:999px; background:linear-gradient(90deg,#fb923c,#60a5fa); animation:pulse 1s infinite; display:inline-block; }
+    @keyframes pulse { 0% { transform:scale(0.85); opacity:.6 } 50% { transform:scale(1.15); opacity:1 } 100% { transform:scale(0.85); opacity:.6 } }
+    /* keep log monospace small */
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", "Courier New", monospace; font-size:12px; }
   </style>
 </head>
-<body>
-  <h2>Speaker Demo — Auto-learn + STT + Save Q</h2>
+<body class="min-h-screen bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 text-white antialiased">
 
-  <div class="row">
-    <input id="profileName" placeholder="Enter speaker name (e.g. Ngan)" />
-    <button id="enrollBtn">Enroll sample (3-8s)</button>
-    <button id="clearProfiles">Clear Profiles</button>
+  <!-- Layout -->
+  <div class="max-w-6xl mx-auto p-6">
+    <!-- Header -->
+    <header class="flex items-center justify-between gap-4 mb-6">
+      <div class="flex items-center gap-4">
+        <div class="w-12 h-12 rounded-xl flex items-center justify-center bg-white/5 ring-1 ring-white/5">
+          <!-- Logo -->
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" class="opacity-95">
+            <rect width="24" height="24" rx="6" fill="#fff" opacity="0.06"></rect>
+            <path d="M6 12h6l2 4 4-8" stroke="#fb923c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path>
+            <circle cx="5" cy="5" r="2" fill="#60a5fa" opacity="0.9"></circle>
+          </svg>
+        </div>
+        <div>
+          <div class="text-xl font-semibold">AduAIvoice</div>
+          <div class="text-xs text-slate-400">Speaker-aware STT · auto-learn voices · quick notes</div>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <label class="text-sm text-slate-300">Backend URL</label>
+        <input id="backendUrl" class="text-slate-900 px-3 py-2 rounded-lg w-[360px]" value="https://monitorial-tectonically-stephani.ngrok-free.dev/transcribe" />
+        <button id="openBackend" class="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 transition">Open</button>
+      </div>
+    </header>
+
+    <!-- Main -->
+    <main class="grid grid-cols-12 gap-6">
+      <!-- Left: Controls & profiles -->
+      <section class="col-span-4 glass p-5 rounded-2xl shadow-lg space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-sm text-slate-300">Profiles</div>
+            <div id="profilesArea" class="mt-2 flex flex-wrap gap-2"></div>
+          </div>
+          <div class="text-right">
+            <div class="text-xs text-slate-400">Auto-learn</div>
+            <label class="flex items-center gap-2 mt-1">
+              <input id="autoLearn" type="checkbox" checked class="accent-orange" />
+              <span class="text-sm text-slate-200">Enabled</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="space-y-2">
+          <input id="profileName" placeholder="Enter name (e.g. Ngan)" class="w-full px-3 py-2 rounded-lg text-slate-900" />
+          <div class="flex gap-2">
+            <button id="enrollBtn" class="flex-1 px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition">Enroll sample (5s)</button>
+            <button id="clearProfiles" class="px-3 py-2 rounded-lg bg-red-600 hover:bg-red-500 transition">Clear</button>
+          </div>
+        </div>
+
+        <hr class="border-white/6" />
+
+        <div class="space-y-2">
+          <div class="flex items-center gap-2">
+            <button id="startRec" class="flex-1 px-4 py-3 rounded-xl bg-gradient-to-r from-orange-500 to-blue-500 shadow-lg hover:scale-[1.01] transform transition">
+              <div class="flex items-center justify-center gap-3">
+                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="4" fill="white"/></svg>
+                <span class="font-semibold">Start</span>
+              </div>
+            </button>
+            <button id="stopRec" disabled class="px-4 py-3 rounded-xl bg-white/6 hover:bg-white/12">Stop</button>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <label class="text-sm text-slate-300">Chunk</label>
+            <select id="chunkLen" class="px-2 py-1 rounded bg-white/5 text-sm">
+              <option value="3000">3s</option>
+              <option value="2000">2s</option>
+              <option value="4000">4s</option>
+            </select>
+
+            <label class="text-sm text-slate-300 ml-3">Threshold</label>
+            <input id="thresh" type="number" step="0.01" value="0.74" class="w-20 px-2 py-1 rounded bg-white/5 text-sm" />
+          </div>
+
+          <div class="text-xs text-slate-400">Status</div>
+          <div id="status" class="flex items-center gap-2">
+            <span id="statusDot" class="pulse-dot"></span>
+            <div id="statusText" class="text-sm text-slate-200">idle</div>
+          </div>
+        </div>
+
+        <hr class="border-white/6" />
+        <div>
+          <div class="text-xs text-slate-400 mb-2">Quick Controls</div>
+          <div class="flex gap-2">
+            <button id="downloadConv" class="flex-1 px-3 py-2 rounded-lg bg-green-700 hover:bg-green-600">Export JSON</button>
+            <button id="clearConv" class="px-3 py-2 rounded-lg bg-white/8 hover:bg-white/12">Clear</button>
+          </div>
+        </div>
+
+        <div class="mt-3 text-xs text-slate-400">
+          <div>Tip: set Backend URL to your ngrok or hosted backend, then Start.</div>
+        </div>
+      </section>
+
+      <!-- Middle: Conversation -->
+      <section class="col-span-5 p-5 rounded-2xl glass shadow-lg flex flex-col">
+        <div class="flex items-center justify-between mb-4">
+          <div class="text-lg font-semibold">Conversation</div>
+          <div class="text-sm text-slate-400">Auto-saved in localStorage</div>
+        </div>
+
+        <div id="convList" class="flex-1 overflow-auto space-y-3 pr-2">
+          <!-- messages rendered here -->
+        </div>
+
+        <div class="mt-4 text-xs text-slate-400">Latest raw activity</div>
+        <div id="log" class="mt-2 mono bg-white/2 p-3 rounded h-28 overflow-auto"></div>
+      </section>
+
+      <!-- Right: Visual / metadata -->
+      <aside class="col-span-3 glass p-5 rounded-2xl shadow-lg">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="w-12 h-12 rounded-lg bg-gradient-to-br from-orange-400 to-blue-400 flex items-center justify-center">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 2v20" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </div>
+          <div>
+            <div class="text-sm text-slate-200 font-semibold">Session</div>
+            <div id="sessionTime" class="text-xs text-slate-400">—</div>
+          </div>
+        </div>
+
+        <div class="space-y-3">
+          <div>
+            <div class="text-xs text-slate-400">Recent speakers</div>
+            <div id="recentSpeakers" class="mt-2 flex flex-wrap gap-2"></div>
+          </div>
+
+          <div>
+            <div class="text-xs text-slate-400">Settings</div>
+            <div class="mt-2 text-sm">
+              <label class="flex items-center gap-2"><input type="checkbox" id="showTimestamps" checked/> Show timestamps</label>
+            </div>
+          </div>
+
+        </div>
+      </aside>
+    </main>
   </div>
 
-  <div class="row">
-    <button id="startRec">Start Continuous</button>
-    <button id="stopRec" disabled>Stop</button>
-    <label style="margin-left:12px">Chunk length:
-      <select id="chunkLen">
-        <option value="3000">3s</option>
-        <option value="2000">2s</option>
-        <option value="4000">4s</option>
-      </select>
-    </label>
-    <label style="margin-left:12px">Threshold:
-      <input id="thresh" type="number" step="0.01" value="0.74" style="width:80px" />
-    </label>
-  </div>
-
-  <div class="row">
-    <div id="profilesArea"></div>
-  </div>
-
-  <div class="row" style="gap:12px;align-items:center">
-    <label class="inline"><input type="checkbox" id="autoLearn" checked /> Auto-learn unknown voices</label>
-    <label class="inline">Backend URL: <input id="backendUrl" value="https://monitorial-tectonically-stephani.ngrok-free.dev/transcribe" style="width:360px" /></label>
-  </div>
-
-  <div id="status" class="row">Status: idle</div>
-
-  <h3>Recent activity</h3>
-  <div id="log"></div>
-
-  <h3>Conversation (saved)</h3>
-  <div id="convList"></div>
-
-  <!-- Meyda -->
+  <!-- Meyda (MFCC) -->
   <script src="https://unpkg.com/meyda/dist/web/meyda.min.js"></script>
 
-<script>
-(async function(){
-
-/* ----------------- Utils ----------------- */
-function el(id){ return document.getElementById(id); }
-function log(...a){
-  const elLog = el('log');
-  elLog.innerHTML = a.map(x=>typeof x==='object'?JSON.stringify(x):x).join(' ') + '<br/>' + elLog.innerHTML;
-}
-function cosine(a,b){
-  if(!a||!b||a.length!==b.length) return -1;
-  let dot=0, na=0, nb=0;
-  for(let i=0;i<a.length;i++){ dot+=a[i]*b[i]; na+=a[i]*a[i]; nb+=b[i]*b[i]; }
-  return dot / (Math.sqrt(na)*Math.sqrt(nb) + 1e-12);
-}
-
-/* ----------------- Storage for profiles & conversation ----------------- */
-let profiles = JSON.parse(localStorage.getItem('sp_profiles')||'{}');
-function saveProfiles(){ localStorage.setItem('sp_profiles', JSON.stringify(profiles)); renderProfiles(); }
-function renderProfiles(){
-  const a = el('profilesArea');
-  a.innerHTML = '';
-  for(const name in profiles){
-    const span = document.createElement('span'); span.className='chip';
-    span.textContent = `${name} (${profiles[name].length} vecs)`;
-    a.appendChild(span);
-  }
-}
-renderProfiles();
-
-let conversation = JSON.parse(localStorage.getItem('conversation')||'[]');
-function saveConversation(){ localStorage.setItem('conversation', JSON.stringify(conversation)); renderConversation(); }
-function renderConversation(){
-  const out = el('convList'); out.innerHTML='';
-  for(let i=conversation.length-1;i>=0;i--){
-    const m = conversation[i];
-    const d = document.createElement('div'); d.className='msg';
-    d.style.background = m.isQuestion ? 'rgba(154,230,180,0.06)' : 'rgba(255,255,255,0.02)';
-    d.innerHTML = `<div class="speaker">${m.speaker} <span class="time">${(new Date(m.time)).toLocaleString()}</span></div>
-                   <div>${m.text}</div>
-                   <div style="opacity:.8;font-size:12px">isQuestion: ${m.isQuestion}</div>`;
-    out.appendChild(d);
-  }
-}
-renderConversation();
-
-function nextUnknownCount(){
-  const c = parseInt(localStorage.getItem('unknownCount')||'0',10) + 1;
-  localStorage.setItem('unknownCount', String(c));
-  return c;
-}
-
-/* ----------------- Audio / MFCC helpers ----------------- */
-const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-let mediaStream = null;
-
-async function blobToAudioBuffer(blob){
-  const arr = await blob.arrayBuffer();
-  return await audioCtx.decodeAudioData(arr);
-}
-function computeMFCCFromBuffer(audioBuffer){
-  const sampleRate = audioBuffer.sampleRate;
-  let sig = audioBuffer.getChannelData(0);
-  const maxSamples = sampleRate * 5;
-  if(sig.length > maxSamples) sig = sig.slice(0, maxSamples);
-  const frameSize = 2048, hop = 512;
-  const mfccs = [];
-  for(let i=0;i+frameSize<=sig.length;i+=hop){
-    try{
-      const mf = Meyda.extract('mfcc', sig.slice(i,i+frameSize), {bufferSize:frameSize, sampleRate});
-      if(mf && mf.length) mfccs.push(mf);
-    }catch(e){}
-  }
-  if(mfccs.length===0) return new Array(13).fill(0);
-  const avg = new Array(mfccs[0].length).fill(0);
-  for(const m of mfccs) for(let i=0;i<m.length;i++) avg[i]+=m[i];
-  for(let i=0;i<avg.length;i++) avg[i]/=mfccs.length;
-  return avg;
-}
-
-/* ----------------- Enroll sample ----------------- */
-el('enrollBtn').addEventListener('click', async ()=>{
-  const name = (el('profileName').value||'').trim();
-  if(!name){ alert('Enter a name first'); return; }
-  if(!mediaStream) {
-    try{ mediaStream = await navigator.mediaDevices.getUserMedia({audio:true}); }
-    catch{ alert('Microphone permission required'); return; }
-  }
-  const rec = new MediaRecorder(mediaStream);
-  const bufs=[];
-  rec.ondataavailable = e=>bufs.push(e.data);
-  rec.start();
-  log('Recording enrollment sample for', name, '...');
-  await new Promise(r=>setTimeout(r,5000));
-  rec.stop();
-  await new Promise(r=>rec.onstop=r);
-  const blob = new Blob(bufs, {type:'audio/webm;codecs=opus'});
-  const ab = await blobToAudioBuffer(blob);
-  const vec = computeMFCCFromBuffer(ab);
-  profiles[name] = profiles[name] || [];
-  profiles[name].push(vec);
-  saveProfiles();
-  log('Enrolled', name);
-});
-
-/* ----------------- Clear profiles ----------------- */
-el('clearProfiles').addEventListener('click', ()=>{
-  if(confirm('Clear all profiles?')){
-    profiles={}; saveProfiles(); log('Profiles cleared');
-  }
-});
-
-/* ----------------- STT: call backend /transcribe ----------------- */
-async function transcribeChunk(blob){
-  try{
-    const backendUrl = el('backendUrl').value.trim() || '/transcribe';
-    const form = new FormData();
-    // name it .webm (backend will forward buffer)
-    form.append('file', blob, 'audio.webm');
-    const res = await fetch(backendUrl, { method:'POST', body: form });
-    if(!res.ok){
-      const txt = await res.text();
-      console.error('transcribe error', res.status, txt);
-      return { error: `HTTP ${res.status}` };
+  <script>
+  (async function(){
+    /* ----------------- Utils ----------------- */
+    const $ = id => document.getElementById(id);
+    function log(...a){ const el = $('log'); el.innerHTML = a.map(x=>typeof x==='object'?JSON.stringify(x):x).join(' ') + '<br/>' + el.innerHTML; }
+    function fmtTime(iso){ const d = new Date(iso); return d.toLocaleString(); }
+    function cosine(a,b){
+      if(!a||!b||a.length!==b.length) return -1;
+      let dot=0, na=0, nb=0;
+      for(let i=0;i<a.length;i++){ dot+=a[i]*b[i]; na+=a[i]*a[i]; nb+=b[i]*b[i]; }
+      return dot / (Math.sqrt(na)*Math.sqrt(nb) + 1e-12);
     }
-    const data = await res.json();
-    return data;
-  }catch(e){
-    console.error('transcribeChunk error', e);
-    return { error: e.message };
-  }
-}
 
-/* ----------------- Question heuristic ----------------- */
-function isLikelyQuestion(text){
-  if(!text) return false;
-  const t = text.trim().toLowerCase();
-  if(t.includes('?')) return true;
-  // Vietnamese question words
-  const qwords = ['ai','gì','giao','tại sao','sao','như thế nào','như thế nào','khi nào','ở đâu','bao giờ','được không','có phải'];
-  for(const w of qwords){
-    if(t.startsWith(w) || t.includes(' ' + w + ' ') ) return true;
-  }
-  // English quick check
-  const eng = ['what','why','how','when','where','who','does','do','is','are','can','could','would'];
-  for(const w of eng){
-    if(t.startsWith(w + ' ') ) return true;
-  }
-  return false;
-}
+    /* ----------------- storage */
+    let profiles = JSON.parse(localStorage.getItem('sp_profiles')||'{}');
+    function saveProfiles(){ localStorage.setItem('sp_profiles', JSON.stringify(profiles)); renderProfiles(); }
+    function renderProfiles(){ const a=$('profilesArea'); a.innerHTML=''; for(const n in profiles){ const s=document.createElement('span'); s.className='px-3 py-1 bg-white/6 rounded-full text-sm'; s.textContent = `${n} (${profiles[n].length})`; a.appendChild(s);} }
+    renderProfiles();
 
-/* ----------------- Continuous record + auto-learn unknown ----------------- */
-let chunkLenMs = parseInt(el('chunkLen').value,10);
-let thresh = parseFloat(el('thresh').value);
-el('chunkLen').addEventListener('change',e=>chunkLenMs=parseInt(e.target.value,10));
-el('thresh').addEventListener('change',e=>thresh=parseFloat(e.target.value));
-
-let recorder = null, tempBufs = [], continuousTimer = null;
-
-el('startRec').addEventListener('click', async ()=>{
-  if(!mediaStream){
-    try{ mediaStream = await navigator.mediaDevices.getUserMedia({audio:true}); }
-    catch{ alert('Need mic'); return; }
-  }
-  tempBufs = [];
-  recorder = new MediaRecorder(mediaStream, {mimeType:'audio/webm;codecs=opus'});
-  recorder.ondataavailable = e=>{ if(e.data && e.data.size>0) tempBufs.push(e.data); };
-  recorder.start(1000);
-  el('startRec').disabled = true;
-  el('stopRec').disabled = false;
-  el('status').textContent = 'Recording continuous...';
-  log('Started continuous recording');
-
-  continuousTimer = setInterval(async ()=>{
-    if(tempBufs.length===0) return;
-    // take all current data
-    const chunkBlob = new Blob(tempBufs.splice(0), {type:'audio/webm;codecs=opus'});
-    // non-blocking processing
-    (async ()=>{
-      try{
-        // compute vector
-        const ab = await blobToAudioBuffer(chunkBlob);
-        const vec = computeMFCCFromBuffer(ab);
-
-        // match against profiles
-        let bestName='Unknown', bestScore=-1;
-        for(const name in profiles){
-          for(const p of profiles[name]){
-            const s = cosine(vec, p);
-            if(s > bestScore){ bestScore = s; bestName = name; }
-          }
-        }
-
-        // If no profiles exist, bestScore remains -1 -> label Unknown
-        let label = (bestScore >= thresh) ? bestName : 'Unknown';
-        const tISO = new Date().toISOString();
-
-        // Auto-learn: if Unknown but similarity > small threshold => create unknown#n
-        if(label === 'Unknown' && el('autoLearn').checked && bestScore > 0.45){
-          const cur = nextUnknownCount();
-          const uname = `unknown #${cur}`;
-          profiles[uname] = profiles[uname] || [];
-          profiles[uname].push(vec);
-          saveProfiles();
-          label = uname;
-          log(`🆕 Auto-learned new voice as ${uname} (score=${bestScore.toFixed(3)})`);
-        } else {
-          log(`[${(new Date()).toLocaleTimeString()}] Chunk matched: ${label} (score=${bestScore.toFixed(3)})`);
-        }
-
-        // Send chunk to backend for transcription
-        const sttRes = await transcribeChunk(chunkBlob);
-        let text = '(no-transcript)';
-        if(sttRes && sttRes.text) text = sttRes.text;
-        else if(sttRes && sttRes.error) text = `[transcribe error: ${sttRes.error}]`;
-
-        // Determine if it's likely a question (simple heuristic)
-        const isQ = isLikelyQuestion(text);
-
-        // Save conversation entry
-        const entry = { speaker: label, time: tISO, text, isQuestion: !!isQ };
-        conversation.push(entry);
-        saveConversation();
-
-        // Log nicely
-        log(`→ ${label}: ${text}  [isQuestion=${isQ}]`);
-      }catch(e){
-        console.error(e);
+    let conversation = JSON.parse(localStorage.getItem('conversation')||'[]');
+    function saveConversation(){ localStorage.setItem('conversation', JSON.stringify(conversation)); renderConversation(); }
+    function renderConversation(){
+      const out=$('convList'); out.innerHTML='';
+      for(let i=conversation.length-1;i>=0;i--){
+        const m=conversation[i];
+        const el=document.createElement('div'); el.className='p-3 rounded-lg';
+        el.style.background = m.isQuestion ? 'linear-gradient(90deg, rgba(251,146,60,0.06), rgba(96,165,250,0.04))' : 'rgba(255,255,255,0.02)';
+        el.innerHTML = `<div class="flex items-start gap-3"><div class="w-10 text-sm"><div class="msg-sender">${m.speaker}</div><div class="text-xs text-slate-400">${$('showTimestamps').checked ? new Date(m.time).toLocaleString() : ''}</div></div><div class="flex-1"><div class="text-sm">${m.text}</div><div class="text-xs text-slate-400 mt-2">isQuestion: ${m.isQuestion}</div></div></div>`;
+        out.appendChild(el);
       }
-    })();
-  }, chunkLenMs);
-});
+    }
+    renderConversation();
 
-el('stopRec').addEventListener('click', ()=>{
-  if(recorder && recorder.state!=='inactive') recorder.stop();
-  clearInterval(continuousTimer);
-  tempBufs=[];
-  el('startRec').disabled = false;
-  el('stopRec').disabled = true;
-  el('status').textContent='Idle';
-  log('Stopped continuous recording');
-});
+    function nextUnknownCount(){ const c = parseInt(localStorage.getItem('unknownCount')||'0',10)+1; localStorage.setItem('unknownCount', String(c)); return c; }
 
-/* ----------------- On load note ----------------- */
-log('Ready — enroll speakers or enable Auto-learn, then Start Continuous.');
-})();
-</script>
+    /* ----------------- audio helpers */
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    let mediaStream = null;
+    async function blobToAudioBuffer(blob){ const arr = await blob.arrayBuffer(); return await audioCtx.decodeAudioData(arr); }
+    function computeMFCCFromBuffer(audioBuffer){
+      const sampleRate = audioBuffer.sampleRate;
+      let sig = audioBuffer.getChannelData(0);
+      const maxSamples = sampleRate * 5;
+      if(sig.length > maxSamples) sig = sig.slice(0,maxSamples);
+      const frameSize = 2048, hop = 512;
+      const mfccs = [];
+      for(let i=0;i+frameSize<=sig.length;i+=hop){
+        try{
+          const mf = Meyda.extract('mfcc', sig.slice(i,i+frameSize), {bufferSize:frameSize, sampleRate});
+          if(mf && mf.length) mfccs.push(mf);
+        }catch(e){}
+      }
+      if(!mfccs.length) return new Array(13).fill(0);
+      const avg = new Array(mfccs[0].length).fill(0);
+      for(const m of mfccs) for(let i=0;i<m.length;i++) avg[i]+=m[i];
+      for(let i=0;i<avg.length;i++) avg[i]/=mfccs.length;
+      return avg;
+    }
+
+    /* ----------------- enroll */
+    $('enrollBtn').addEventListener('click', async ()=>{
+      const name = ($('profileName').value||'').trim();
+      if(!name){ alert('Enter name'); return; }
+      if(!mediaStream){
+        try{ mediaStream = await navigator.mediaDevices.getUserMedia({audio:true}); }catch(e){ alert('Mic permission required'); return; }
+      }
+      const rec = new MediaRecorder(mediaStream);
+      const bufs=[];
+      rec.ondataavailable = e=>bufs.push(e.data);
+      rec.start();
+      log('Recording enrollment sample for', name, '... speak 4-6s');
+      await new Promise(r=>setTimeout(r,5000));
+      rec.stop();
+      await new Promise(r=>rec.onstop=r);
+      const blob = new Blob(bufs, {type:'audio/webm;codecs=opus'});
+      const ab = await blobToAudioBuffer(blob);
+      const vec = computeMFCCFromBuffer(ab);
+      profiles[name] = profiles[name] || [];
+      profiles[name].push(vec);
+      saveProfiles();
+      log('Enrolled', name);
+    });
+
+    $('clearProfiles').addEventListener('click', ()=>{ if(confirm('Clear all profiles?')){ profiles={}; saveProfiles(); log('Profiles cleared'); } });
+
+    /* ----------------- STT call */
+    async function transcribeChunk(blob){
+      try{
+        const backendUrl = $('backendUrl').value.trim() || '/transcribe';
+        $('statusText').textContent = 'Sending chunk...';
+        const form = new FormData();
+        form.append('audio', blob, 'audio.webm'); // important: 'audio'
+        const res = await fetch(backendUrl, { method:'POST', body: form });
+        if(!res.ok){ const txt = await res.text(); console.error('transcribe error', res.status, txt); $('statusText').textContent='Backend error'; return { error: `HTTP ${res.status}` }; }
+        const data = await res.json();
+        $('statusText').textContent = 'Received transcript';
+        setTimeout(()=>{ if($('statusText').textContent==='Received transcript') $('statusText').textContent='Recording...'; }, 900);
+        return data;
+      }catch(e){
+        console.error('transcribeChunk error', e);
+        $('statusText').textContent = 'Transcribe failed';
+        return { error: e.message };
+      }
+    }
+
+    /* ----------------- question heuristic */
+    function isLikelyQuestion(text){
+      if(!text) return false;
+      const t = text.trim().toLowerCase();
+      if(t.includes('?')) return true;
+      const qwords = ['ai','gì','tại sao','sao','như thế nào','khi nào','ở đâu','bao giờ','được không','có phải'];
+      for(const w of qwords){ if(t.startsWith(w) || t.includes(' ' + w + ' ')) return true; }
+      const eng = ['what','why','how','when','where','who','does','do','is','are','can','could','would'];
+      for(const w of eng){ if(t.startsWith(w+' ')) return true; }
+      return false;
+    }
+
+    /* ----------------- continuous record */
+    let chunkLenMs = parseInt($('chunkLen').value,10);
+    let thresh = parseFloat($('thresh').value);
+    $('chunkLen').addEventListener('change', e=> chunkLenMs = parseInt(e.target.value,10));
+    $('thresh').addEventListener('change', e=> thresh = parseFloat(e.target.value));
+
+    let recorder = null, tempBufs = [], continuousTimer = null;
+
+    $('startRec').addEventListener('click', async ()=>{
+      if(!mediaStream){
+        try{ mediaStream = await navigator.mediaDevices.getUserMedia({audio:true}); }catch(e){ alert('Need mic'); return; }
+      }
+      tempBufs = [];
+      recorder = new MediaRecorder(mediaStream, {mimeType:'audio/webm;codecs=opus'});
+      recorder.ondataavailable = e=>{ if(e.data && e.data.size>0) tempBufs.push(e.data); };
+      recorder.start(1000);
+      $('startRec').disabled = true; $('stopRec').disabled = false;
+      $('statusText').textContent = 'Recording...';
+      log('Started continuous recording');
+      continuousTimer = setInterval(async ()=>{
+        if(tempBufs.length===0) return;
+        const chunkBlob = new Blob(tempBufs.splice(0), {type:'audio/webm;codecs=opus'});
+        (async ()=>{
+          try{
+            const ab = await blobToAudioBuffer(chunkBlob);
+            const vec = computeMFCCFromBuffer(ab);
+            let bestName='Unknown', bestScore=-1;
+            for(const name in profiles) for(const p of profiles[name]){ const s = cosine(vec, p); if(s>bestScore){ bestScore=s; bestName=name; } }
+            let label = (bestScore >= thresh) ? bestName : 'Unknown';
+            const tISO = new Date().toISOString();
+            if(label==='Unknown' && $('autoLearn').checked && bestScore > 0.45){
+              const cur = nextUnknownCount(); const uname = `unknown #${cur}`; profiles[uname]=profiles[uname]||[]; profiles[uname].push(vec); saveProfiles(); label = uname; log('Auto-learned', uname);
+            } else {
+              log('Chunk matched:', label, `(score=${bestScore.toFixed(3)})`);
+            }
+
+            const sttRes = await transcribeChunk(chunkBlob);
+            let text = '(no-transcript)'; if(sttRes && sttRes.text) text = sttRes.text; else if(sttRes && sttRes.error) text = `[err: ${sttRes.error}]`;
+
+            const isQ = isLikelyQuestion(text);
+            const entry = { speaker: label, time: tISO, text, isQuestion: !!isQ };
+            conversation.push(entry); saveConversation();
+            // recent speakers box
+            const rs = $('recentSpeakers'); const sspan=document.createElement('span'); sspan.className='px-2 py-1 bg-white/6 rounded text-sm'; sspan.textContent = label; rs.prepend(sspan);
+            log(`→ ${label}: ${text}  [isQuestion=${isQ}]`);
+          }catch(e){
+            console.error(e);
+          }
+        })();
+      }, chunkLenMs);
+    });
+
+    $('stopRec').addEventListener('click', ()=>{ if(recorder && recorder.state!=='inactive') recorder.stop(); clearInterval(continuousTimer); tempBufs=[]; $('startRec').disabled=false; $('stopRec').disabled=true; $('statusText').textContent='Idle'; log('Stopped'); });
+
+    /* ----------------- other UI actions */
+    $('downloadConv').addEventListener('click', ()=>{
+      const data = JSON.stringify(conversation, null, 2);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([data], {type:'application/json'}));
+      a.download = `conversation-${Date.now()}.json`;
+      a.click();
+    });
+    $('clearConv').addEventListener('click', ()=>{ if(confirm('Clear conversation?')){ conversation=[]; saveConversation(); log('Conversation cleared'); } });
+
+    $('openBackend').addEventListener('click', ()=>{ const u = $('backendUrl').value.trim(); if(u) window.open(u.replace(/\/transcribe\/?$/,'/'), '_blank'); });
+
+    /* ----------------- small startup */
+    setInterval(()=>{ $('sessionTime').textContent = new Date().toLocaleString(); }, 1000);
+    log('Ready — enroll or Start. Backend URL must point to your /transcribe endpoint.');
+  })();
+  </script>
 </body>
 </html>
