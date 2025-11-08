@@ -42,7 +42,8 @@
 
       <div class="flex items-center gap-3">
         <label class="text-sm text-slate-300">Backend URL</label>
-        <input id="backendUrl" class="text-slate-900 px-3 py-2 rounded-lg w-[360px]" value="https://adubackend-production.up.railway.app//transcribe" />
+        <!-- UPDATED BACKEND URL -->
+        <input id="backendUrl" class="text-slate-900 px-3 py-2 rounded-lg w-[360px]" value="https://adubackend-production.up.railway.app/transcribe" />
         <button id="openBackend" class="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 transition">Open</button>
       </div>
     </header>
@@ -238,123 +239,4 @@
       rec.ondataavailable = e=>bufs.push(e.data);
       rec.start();
       log('Recording enrollment sample for', name, '... speak 4-6s');
-      await new Promise(r=>setTimeout(r,5000));
-      rec.stop();
-      await new Promise(r=>rec.onstop=r);
-      const blob = new Blob(bufs, {type:'audio/webm;codecs=opus'});
-      const ab = await blobToAudioBuffer(blob);
-      const vec = computeMFCCFromBuffer(ab);
-      profiles[name] = profiles[name] || [];
-      profiles[name].push(vec);
-      saveProfiles();
-      log('Enrolled', name);
-    });
-
-    $('clearProfiles').addEventListener('click', ()=>{ if(confirm('Clear all profiles?')){ profiles={}; saveProfiles(); log('Profiles cleared'); } });
-
-    /* ----------------- STT call */
-    async function transcribeChunk(blob){
-      try{
-        const backendUrl = $('backendUrl').value.trim() || '/transcribe';
-        $('statusText').textContent = 'Sending chunk...';
-        const form = new FormData();
-        form.append('audio', blob, 'audio.webm'); // important: 'audio'
-        const res = await fetch(backendUrl, { method:'POST', body: form });
-        if(!res.ok){ const txt = await res.text(); console.error('transcribe error', res.status, txt); $('statusText').textContent='Backend error'; return { error: `HTTP ${res.status}` }; }
-        const data = await res.json();
-        $('statusText').textContent = 'Received transcript';
-        setTimeout(()=>{ if($('statusText').textContent==='Received transcript') $('statusText').textContent='Recording...'; }, 900);
-        return data;
-      }catch(e){
-        console.error('transcribeChunk error', e);
-        $('statusText').textContent = 'Transcribe failed';
-        return { error: e.message };
-      }
-    }
-
-    /* ----------------- question heuristic */
-    function isLikelyQuestion(text){
-      if(!text) return false;
-      const t = text.trim().toLowerCase();
-      if(t.includes('?')) return true;
-      const qwords = ['ai','gì','tại sao','sao','như thế nào','khi nào','ở đâu','bao giờ','được không','có phải'];
-      for(const w of qwords){ if(t.startsWith(w) || t.includes(' ' + w + ' ')) return true; }
-      const eng = ['what','why','how','when','where','who','does','do','is','are','can','could','would'];
-      for(const w of eng){ if(t.startsWith(w+' ')) return true; }
-      return false;
-    }
-
-    /* ----------------- continuous record */
-    let chunkLenMs = parseInt($('chunkLen').value,10);
-    let thresh = parseFloat($('thresh').value);
-    $('chunkLen').addEventListener('change', e=> chunkLenMs = parseInt(e.target.value,10));
-    $('thresh').addEventListener('change', e=> thresh = parseFloat(e.target.value));
-
-    let recorder = null, tempBufs = [], continuousTimer = null;
-
-    $('startRec').addEventListener('click', async ()=>{
-      if(!mediaStream){
-        try{ mediaStream = await navigator.mediaDevices.getUserMedia({audio:true}); }catch(e){ alert('Need mic'); return; }
-      }
-      tempBufs = [];
-      recorder = new MediaRecorder(mediaStream, {mimeType:'audio/webm;codecs=opus'});
-      recorder.ondataavailable = e=>{ if(e.data && e.data.size>0) tempBufs.push(e.data); };
-      recorder.start(1000);
-      $('startRec').disabled = true; $('stopRec').disabled = false;
-      $('statusText').textContent = 'Recording...';
-      log('Started continuous recording');
-      continuousTimer = setInterval(async ()=>{
-        if(tempBufs.length===0) return;
-        const chunkBlob = new Blob(tempBufs.splice(0), {type:'audio/webm;codecs=opus'});
-        (async ()=>{
-          try{
-            const ab = await blobToAudioBuffer(chunkBlob);
-            const vec = computeMFCCFromBuffer(ab);
-            let bestName='Unknown', bestScore=-1;
-            for(const name in profiles) for(const p of profiles[name]){ const s = cosine(vec, p); if(s>bestScore){ bestScore=s; bestName=name; } }
-            let label = (bestScore >= thresh) ? bestName : 'Unknown';
-            const tISO = new Date().toISOString();
-            if(label==='Unknown' && $('autoLearn').checked && bestScore > 0.45){
-              const cur = nextUnknownCount(); const uname = `unknown #${cur}`; profiles[uname]=profiles[uname]||[]; profiles[uname].push(vec); saveProfiles(); label = uname; log('Auto-learned', uname);
-            } else {
-              log('Chunk matched:', label, `(score=${bestScore.toFixed(3)})`);
-            }
-
-            const sttRes = await transcribeChunk(chunkBlob);
-            let text = '(no-transcript)'; if(sttRes && sttRes.text) text = sttRes.text; else if(sttRes && sttRes.error) text = `[err: ${sttRes.error}]`;
-
-            const isQ = isLikelyQuestion(text);
-            const entry = { speaker: label, time: tISO, text, isQuestion: !!isQ };
-            conversation.push(entry); saveConversation();
-            // recent speakers box
-            const rs = $('recentSpeakers'); const sspan=document.createElement('span'); sspan.className='px-2 py-1 bg-white/6 rounded text-sm'; sspan.textContent = label; rs.prepend(sspan);
-            log(`→ ${label}: ${text}  [isQuestion=${isQ}]`);
-          }catch(e){
-            console.error(e);
-          }
-        })();
-      }, chunkLenMs);
-    });
-
-    $('stopRec').addEventListener('click', ()=>{ if(recorder && recorder.state!=='inactive') recorder.stop(); clearInterval(continuousTimer); tempBufs=[]; $('startRec').disabled=false; $('stopRec').disabled=true; $('statusText').textContent='Idle'; log('Stopped'); });
-
-    /* ----------------- other UI actions */
-    $('downloadConv').addEventListener('click', ()=>{
-      const data = JSON.stringify(conversation, null, 2);
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(new Blob([data], {type:'application/json'}));
-      a.download = `conversation-${Date.now()}.json`;
-      a.click();
-    });
-    $('clearConv').addEventListener('click', ()=>{ if(confirm('Clear conversation?')){ conversation=[]; saveConversation(); log('Conversation cleared'); } });
-
-    $('openBackend').addEventListener('click', ()=>{ const u = $('backendUrl').value.trim(); if(u) window.open(u.replace(/\/transcribe\/?$/,'/'), '_blank'); });
-
-    /* ----------------- small startup */
-    setInterval(()=>{ $('sessionTime').textContent = new Date().toLocaleString(); }, 1000);
-    log('Ready — enroll or Start. Backend URL must point to your /transcribe endpoint.');
-  })();
-  </script>
-</body>
-</html>
-
+      await new Promise(r=>setTimeout(r,5000)
